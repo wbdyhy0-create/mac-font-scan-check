@@ -1,7 +1,7 @@
 #!/bin/bash
-# Starts the published program on this Mac, notes how long it takes to open and how busy it is at rest, then runs the program's own
-# self test (Help > Self test), which times its parts from the inside, and keeps the report it makes. Last, with a document open, it
-# sends a burst of tool keys and notes how much processor time the program needs for them.
+# Starts the published program on this Mac and measures how busy it keeps the processor at rest: first as it opens the first time,
+# with the tour of the tools showing, then with the tour closed. Then, with the tour closed, a burst of tool keys and the program's
+# own self test (Help > Self test), which times its parts from the inside.
 set -u
 APP_NAME="eMood Trial 30"
 OUT="$PWD/out"
@@ -13,7 +13,9 @@ minus() { python3 -c "import sys; print(round(float(sys.argv[1])-float(sys.argv[
 busy() { ps -Ao pcpu,rss,comm | grep -E "$APP_NAME|com.apple.WebKit" | grep -v grep | awk '{c=$1; r=$2; $1=""; $2=""; n=$0; sub(/^ +/,"",n); sub(/.*\//,"",n); printf "    %6.1f%% cpu  %6d MB  %s\n", c, r/1024, n}'; }
 # the processor time the program and its web view have used so far, in seconds
 used() { ps -Ao cputime,comm | grep -E "$APP_NAME|com.apple.WebKit" | grep -v grep | awk '{n=split($1,a,":"); s+=(n==3 ? a[1]*3600+a[2]*60+a[3] : a[1]*60+a[2])} END{printf "%.2f", s}'; }
-# waits until the program has used almost no processor time for a few looks in a row (at most $1 seconds); prints how long it waited
+# how much processor time the program uses in $1 seconds of doing nothing
+rest() { local a; a=$(used); sleep "$1"; echo "processor time used in $1 s at rest: $(minus "$(used)" "$a") s"; busy; }
+# waits until the program has used almost no processor time for a few looks in a row (at most $1 seconds)
 until_calm() {
   local max=$1 from prev cur calm=0
   from=$(now); prev=$(used)
@@ -24,15 +26,22 @@ until_calm() {
     prev=$cur
     [ "$calm" -ge 4 ] && break
   done
-  since "$from"
+}
+# what the busiest process of the web view is doing, from three seconds of samples: the heaviest lines
+what_runs() {
+  local pid
+  pid=$(ps -Ao pcpu,pid,comm | grep "com.apple.WebKit.$1" | grep -v grep | sort -rn | head -1 | awk '{print $2}')
+  [ -z "$pid" ] && { echo "no $1 process"; return; }
+  sudo sample "$pid" 3 -file "$OUT/sample-$2.txt" >/dev/null 2>&1
+  echo "  $1 (pid $pid), heaviest at the top of the stack:"
+  awk '/Sort by top of stack/{p=1;next} p&&NF{print "    " $0; n++} n>=14{exit}' "$OUT/sample-$2.txt" | cut -c1-150
 }
 pressed() { case "$1" in PRESSED*|CLICKED*) return 0 ;; *) return 1 ;; esac; }
 
 echo "== the Mac =="
 sw_vers
 uname -m
-sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize 2>/dev/null
-system_profiler SPDisplaysDataType 2>/dev/null | grep -E "Chipset|VRAM|Metal|Resolution" | head -6
+sysctl -n machdep.cpu.brand_string hw.ncpu 2>/dev/null
 
 echo "== the program =="
 arch=$(uname -m)
@@ -40,85 +49,36 @@ if [ "$arch" = "arm64" ]; then pat="aarch64"; else pat="x86_64"; fi
 gh release download "$RELEASE_TAG" -R "$RELEASE_REPO" -p "*${pat}.app.tar.gz" -D dl || exit 1
 mkdir -p app && tar -xzf dl/*.tar.gz -C app
 xattr -cr app/*.app 2>/dev/null
-ls dl app
+ls dl
 
 echo "== opening =="
 t0=$(now)
 open -n app/*.app
-opened=""
 for i in $(seq 1 80); do
   n=$(AX windows)
-  if [ "$n" -ge 1 ] 2>/dev/null; then opened=$(since "$t0"); break; fi
+  if [ "$n" -ge 1 ] 2>/dev/null; then echo "window after: $(since "$t0") s"; break; fi
   sleep 0.5
 done
-echo "window after: ${opened:-not seen} s"
 sleep 5
 AX front
 AX bounds
-sleep 1
-
-echo "== the trial notice =="
 answer=$(AX click '^(אני מסכים|I agree)$'); echo "$answer"
-sleep 6
-screencapture -x "$OUT/1-after-notice.png"
 
-echo "== at rest, the program open (five looks, two seconds apart) =="
-u0=$(used)
-for i in 1 2 3 4 5; do echo "  look $i"; busy; sleep 2; done
-echo "processor time used in those 10 s: $(minus "$(used)" "$u0") s"
+echo "== A. at rest, as the program opens the first time (the tour of the tools is showing) =="
+sleep 25
+screencapture -x "$OUT/1-first-open.png"
+rest 20
+what_runs WebContent tour-webcontent
+what_runs GPU tour-gpu
 
-echo "== what the window holds =="
-t1=$(now)
-AX dump > "$OUT/tree-1.txt"
-echo "elements: $(wc -l < "$OUT/tree-1.txt")   read in $(since "$t1") s"
-grep -nE "\| (Help|עזרה|File|קובץ|A4)" "$OUT/tree-1.txt" | head -10
-
-echo "== the self test =="
-finished=""
-answer=$(AX click '^(Help|עזרה)$'); echo "$answer"
-if pressed "$answer"; then
-  sleep 1.5
-  screencapture -x "$OUT/2-help-menu.png"
-  answer=$(AX click '(Self test|בדיקה עצמית)'); echo "$answer"
-fi
-if pressed "$answer"; then
-  sleep 3
-  screencapture -x "$OUT/3-self-test-window.png"
-  u1=$(used)
-  started=$(now)
-  answer=$(AX rclick '^(Run the check|הרץ בדיקה)$'); echo "$answer"
-fi
-if pressed "$answer"; then
-  sleep 4
-  screencapture -x "$OUT/4-running.png"
-  waited=$(until_calm 1500)
-  finished=$(since "$started")
-  echo "self test: calm again after ${finished} s from the press (the last 8 s of that are the waiting for calm); processor time used: $(minus "$(used)" "$u1") s"
-  busy
-  screencapture -x "$OUT/5-finished.png"
-  answer=$(AX rclick '(Copy as a request|העתק כבקשה)'); echo "$answer"
-  sleep 2
-  pbpaste > "$OUT/report.md"
-  echo "report: $(wc -c < "$OUT/report.md") bytes"
-  echo "== the report the program made =="
-  cat "$OUT/report.md"
-  echo
-  echo "== end of the report =="
-  answer=$(AX rclick '^(Close|סגור)$'); echo "$answer"
-  sleep 2
-else
-  echo "the self test was not started: see the pictures and tree-1.txt"
-  screencapture -x "$OUT/x-not-started.png"
-fi
-
-echo "== a document open, and a burst of tool keys =="
-answer=$(AX click 'A4'); echo "$answer"
-sleep 5
-screencapture -x "$OUT/6-document.png"
-u2=$(used)
+echo "== B. at rest, the tour of the tools closed =="
+answer=$(AX rclick '^(סגור|Close)$'); echo "$answer"
 sleep 10
-echo "at rest with a document, processor time used in 10 s: $(minus "$(used)" "$u2") s"
-busy
+screencapture -x "$OUT/2-tour-closed.png"
+rest 20
+what_runs WebContent closed-webcontent
+
+echo "== C. a burst of tool keys, the tour closed =="
 u3=$(used)
 t3=$(now)
 osascript -e 'tell application "System Events"
@@ -131,6 +91,32 @@ osascript -e 'tell application "System Events"
   keystroke "v"
 end tell' 2>&1
 sent=$(since "$t3")
-calm=$(until_calm 120)
+until_calm 60
 echo "121 tool keys sent in ${sent} s; calm again $(since "$t3") s after the first key (the last 8 s are the waiting for calm); processor time used: $(minus "$(used)" "$u3") s"
-screencapture -x "$OUT/7-after-keys.png"
+screencapture -x "$OUT/3-after-keys.png"
+
+echo "== D. the self test, the tour closed =="
+answer=$(AX click '^(Help|עזרה)$'); echo "$answer"
+if pressed "$answer"; then sleep 1.5; answer=$(AX click '(Self test|בדיקה עצמית)'); echo "$answer"; fi
+if pressed "$answer"; then
+  sleep 3
+  u1=$(used)
+  started=$(now)
+  answer=$(AX rclick '^(Run the check|הרץ בדיקה)$'); echo "$answer"
+fi
+if pressed "$answer"; then
+  sleep 4
+  until_calm 900
+  echo "self test: calm again after $(since "$started") s from the press (the last 8 s are the waiting for calm); processor time used: $(minus "$(used)" "$u1") s"
+  screencapture -x "$OUT/4-self-test-finished.png"
+  answer=$(AX rclick '(Copy as a request|העתק כבקשה)'); echo "$answer"
+  sleep 2
+  pbpaste > "$OUT/report.md"
+  echo "== the times of the self test, from its own report =="
+  grep -E "^- (גרסה|מערכת|משך)|^\| |עמודים לקחו" "$OUT/report.md" | cut -c1-400
+else
+  echo "the self test was not started"
+  screencapture -x "$OUT/x-not-started.png"
+fi
+echo "== end =="
+rest 10
