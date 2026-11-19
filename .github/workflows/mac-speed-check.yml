@@ -1,0 +1,35 @@
+# A check, not a build: opens the published program on an Apple-chip Mac and on an Intel Mac, and runs the program's own self test,
+# which times its parts from the inside. The report and pictures of the screen are kept with the run.
+name: Mac speed check
+
+on:
+  push:
+    branches: [main]
+    paths: ['speed-check/**', '.github/workflows/mac-speed-check.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REPO: wbdyhy0-create/imudist-releases
+      RELEASE_TAG: v0.0.52-trial30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open the program and run its self test
+        run: bash speed-check/run.sh
+      - name: Keep the report and the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speed-${{ matrix.runner }}
+          path: out
