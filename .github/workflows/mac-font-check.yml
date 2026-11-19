@@ -1,0 +1,48 @@
+# A check, not a build: scans the installed fonts with the fontdb crate on an Apple-chip Mac and on an Intel Mac, with a Hebrew
+# font installed the way a user installs one, and prints what the scan lists.
+name: Mac font list check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Which Mac this is
+        run: |
+          sw_vers
+          uname -m
+
+      - name: Install a Hebrew font the way a user does (into ~/Library/Fonts, and one in a folder inside it)
+        run: |
+          mkdir -p ~/Library/Fonts/Inside
+          url='https://github.com/google/fonts/raw/main/ofl/frankruhllibre/FrankRuhlLibre%5Bwght%5D.ttf'
+          if curl -fsSL -o ~/Library/Fonts/FrankRuhlLibre-check.ttf "$url"; then
+            echo "downloaded"
+          else
+            echo "the download failed: a font of the system is copied instead"
+            cp /System/Library/Fonts/Supplemental/Arial.ttf ~/Library/Fonts/Copy-check.ttf
+          fi
+          cp /System/Library/Fonts/Supplemental/Georgia.ttf ~/Library/Fonts/Inside/Georgia-inside-check.ttf || true
+          ls -la ~/Library/Fonts ~/Library/Fonts/Inside
+
+      - name: Font files of the old Mac kinds on this machine (.dfont, suitcases, Type 1)
+        run: |
+          find /System/Library/Fonts /Library/Fonts /System/Library/AssetsV2 \( -iname '*.dfont' -o -iname '*.suit' -o -iname '*.pfb' -o -iname '*.pfa' \) 2>/dev/null | head -20 || true
+          echo "(end of the list)"
+
+      - name: Run the font scan
+        run: cargo run --release --locked --manifest-path mac-font-check/Cargo.toml
