@@ -1,7 +1,7 @@
 #!/bin/bash
-# Opens the published program with the test fonts installed, and reads what its own font list shows for them: which families, which
-# weights. Also measures the processor time the program uses when the text tool is chosen, once with the font list set to show every
-# font and once (after the program is opened again) with the list set to show Hebrew fonts only.
+# Opens the published program with the test fonts installed and measures the processor time it uses: when its font list is opened the
+# first time and again, when the list is set to show Hebrew fonts only, and when the text tool is chosen after the program was opened
+# again with the list still set so.
 set -u
 APP_NAME="eMood Trial 30"
 OUT="$PWD/out"
@@ -52,63 +52,56 @@ sleep 12
 AX rclick '^(סגור|Close)$'
 sleep 6
 
+escape() { osascript -e 'tell application "System Events" to key code 53' 2>&1; }
+
 echo "== A. the text tool is chosen; the font list is set to show every font =="
 u=$(used); t=$(now)
 key t
 until_calm 60
 echo "processor time used: $(minus "$(used)" "$u") s (calm again after $(since "$t") s, of which the last 6 s are the waiting)"
 
-echo "== B. the font list is opened =="
+echo "== B1. the font list is opened, the first time =="
 u=$(used); t=$(now)
 AX click '^Segoe UI$'
-until_calm 60
+until_calm 90
 echo "processor time used: $(minus "$(used)" "$u") s (with the search for the button; calm again after $(since "$t") s)"
-screencapture -x "$OUT/b-list-open.png"
+escape
+sleep 4
 
-echo "== C. what the list shows for the test fonts =="
-key probe
-sleep 3
-screencapture -x "$OUT/c1-probe.png"
-rows c-probe
-for name in "Probe Same" "Probe Mix"; do
-  AX click "^משקלים של ${name}\$"
-done
-sleep 2
-all; key "probe same"; sleep 2; screencapture -x "$OUT/c2-same-weights.png"
-all; key "probe mix"; sleep 2; screencapture -x "$OUT/c3-mix-weights.png"
-all; key "probe glued"; sleep 2; screencapture -x "$OUT/c4-glued.png"
-all; key "probe odd"; sleep 2; screencapture -x "$OUT/c5-odd.png"
-all; key "probe win"; sleep 2; screencapture -x "$OUT/c6-win.png"
-all; key "probe heb"; sleep 2; screencapture -x "$OUT/c7-heb.png"
-all; key "probe sep"; sleep 2; screencapture -x "$OUT/c8-sep.png"
+echo "== B2. the font list is opened again =="
+u=$(used); t=$(now)
+AX click '^Segoe UI$'
+until_calm 90
+echo "processor time used: $(minus "$(used)" "$u") s (with the search for the button; calm again after $(since "$t") s)"
+screencapture -x "$OUT/b2-list-open.png"
 
 echo "== D. the list is set to show Hebrew fonts only =="
-all; key probe; sleep 2
 u=$(used); t=$(now)
 AX click '^(גופנים בעברית|Hebrew fonts)$'
 until_calm 90
 echo "processor time used: $(minus "$(used)" "$u") s (with the search for the button; calm again after $(since "$t") s)"
 screencapture -x "$OUT/d-hebrew-only.png"
-rows d-probe-hebrew-only
+escape
 
-echo "== E. the program is closed and opened again (the list remembers 'Hebrew fonts only'), and the text tool is chosen =="
+echo "== E. the program is closed and opened again (the list remembers 'Hebrew fonts only'); a document is opened and the text tool chosen =="
 sleep 6
 osascript -e 'tell application "System Events" to keystroke "q" using command down'
 sleep 5
 pkill -f "$APP_NAME" 2>/dev/null
 sleep 3
 open_program
-sleep 15
-AX rclick '^(סגור|Close)$'
+sleep 12
+AX dump > "$OUT/e0-welcome.txt"
+AX click 'A4'
 sleep 6
-screencapture -x "$OUT/e1-opened-again.png"
+echo "the text tool is on the screen: $(AX exists '^טקסט \(T\)$')"
+screencapture -x "$OUT/e1-document.png"
+AX front
 u=$(used); t=$(now)
 key t
 until_calm 90
 echo "processor time used: $(minus "$(used)" "$u") s (calm again after $(since "$t") s, of which the last 6 s are the waiting)"
 screencapture -x "$OUT/e2-text-tool.png"
 AX click '^Segoe UI$'
-sleep 3
+sleep 4
 screencapture -x "$OUT/e3-list.png"
-AX dump > "$OUT/e-list.txt"
-echo "Hebrew-only button pressed in the list that opened: $(grep -c 'גופנים בעברית' "$OUT/e-list.txt") line(s); rows in the list: $(grep -c 'AXButton' "$OUT/e-list.txt")"
