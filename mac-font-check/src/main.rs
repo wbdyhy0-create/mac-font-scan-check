@@ -111,6 +111,17 @@ fn main() {
     println!("{line}");
   }
 
+  println!("\n== the user's own faces, as listed: family | style | short name | file ==");
+  let mut faces: Vec<String> = fonts
+    .iter()
+    .filter(|font| font.path.starts_with(user_dir.as_str()))
+    .map(|font| format!("{} | {} | {} | {}", font.family, font.style, font.postscript_name, font.path.rsplit('/').next().unwrap_or("")))
+    .collect();
+  faces.sort();
+  for line in &faces {
+    println!("{line}");
+  }
+
   println!("\n== font files in the scanned folders, by ending: files / files the scan listed ==");
   let listed: BTreeSet<&str> = fonts.iter().map(|font| font.path.as_str()).collect();
   let mut by_ending: BTreeMap<String, (usize, usize, Vec<String>)> = BTreeMap::new();
@@ -134,6 +145,20 @@ fn main() {
   }
   for (ending, (count, read, examples)) in &by_ending {
     println!("{:<14} {:>5} / {:<5} {}", ending, count, read, if examples.is_empty() { String::new() } else { format!("not listed, e.g. {}", examples.join(" | ")) });
+  }
+
+  println!("\n== the user's own font files the scan did not list ==");
+  let mut missed = 0;
+  for file in files.iter().filter(|file| file.starts_with(&user_dir)) {
+    let text = file.to_string_lossy().into_owned();
+    let real = std::fs::canonicalize(file).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| text.clone());
+    if !listed.contains(text.as_str()) && !listed.contains(real.as_str()) {
+      println!("{text}");
+      missed += 1;
+    }
+  }
+  if missed == 0 {
+    println!("(none)");
   }
 
   // the verdict the job passes or fails on

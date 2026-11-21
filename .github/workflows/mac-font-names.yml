@@ -1,0 +1,90 @@
+# A check, not a build: test fonts whose names and weight numbers are written in the ways font makers write them are installed the
+# way a user installs fonts, and three things are read on an Apple-chip Mac and on an Intel Mac: what a fontdb scan lists, how the
+# system itself names the fonts, and what the system's web view really draws for each name and each weight.
+name: Mac font names check
+
+on:
+  push:
+    branches: [main]
+    paths: ['font-names/**', '.github/workflows/mac-font-names.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  names:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Which Mac this is
+        run: |
+          sw_vers
+          uname -m
+
+      - name: Make the test fonts and install them
+        run: bash font-names/install.sh
+
+      - name: What a fontdb scan lists
+        run: cargo run --release --locked --manifest-path mac-font-check/Cargo.toml | tee out/scan.txt || true
+
+      - name: How the system names them, and what the web view draws
+        run: |
+          swiftc -swift-version 5 -O font-names/probe.swift -o probe
+          ./probe names "$PWD/font-names/probe.html" "$PWD/out/names.json" "$HOME/Library/Fonts" | tee out/system-names.txt
+          python3 -c "import json; print(json.dumps(json.load(open('out/names.json')), ensure_ascii=False, indent=1))"
+
+      - name: How long the web view takes over every family of the computer
+        if: always()
+        run: |
+          ./probe canvas "$PWD/font-names/probe.html" "$PWD/out/canvas.json" || true
+          cat out/canvas.json || true
+          echo
+          ./probe rows "$PWD/font-names/probe.html" "$PWD/out/rows.json" || true
+          cat out/rows.json || true
+
+      - name: How the system's own report names them
+        if: always()
+        run: |
+          system_profiler SPFontsDataType 2>/dev/null | grep -A16 -E 'Probe[A-Za-z]+-[A-Za-z]+\.(ttf|otf):$' > out/system-report.txt || true
+          wc -l out/system-report.txt
+          head -120 out/system-report.txt
+
+      - name: Keep what was read
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: names-${{ matrix.runner }}
+          path: out
+
+  app:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REPO: wbdyhy0-create/imudist-releases
+      RELEASE_TAG: v0.0.53-trial30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Make the test fonts and install them
+        run: bash font-names/install.sh
+      - name: Open the published program and write down what its window shows
+        run: bash font-names/app.sh
+      - name: Keep what was read
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-look
+          path: out

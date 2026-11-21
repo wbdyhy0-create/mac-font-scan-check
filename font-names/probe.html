@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>font probe</title>
+<body>
+<script src="probe-data.js"></script>
+<script>
+// A page for a web view: it draws a line of text in each test family, by each name the family may be known by and in each weight,
+// and tells by the width of the line which of the five weights was really drawn. The answer goes back as one JSON text.
+(async () => {
+  const P = window.PROBE
+  const MODE = window.MODE || 'names'
+  const ALL = window.ALL_FAMILIES || []
+  const out = { mode: MODE, agent: navigator.userAgent }
+  const clean = (name) => name.replace(/["\\]/g, '')
+  try {
+    if (MODE === 'canvas') {
+      // how long it takes to measure a line of Hebrew in every family of the computer, the first time and again
+      const context = document.createElement('canvas').getContext('2d')
+      const lap = () => {
+        const started = performance.now()
+        let differ = 0
+        const slow = []
+        for (const family of ALL) {
+          const from = performance.now()
+          context.font = '40px "__no_such_family__"'
+          const base = context.measureText(P.sample).width
+          context.font = `40px "${clean(family)}"`
+          if (Math.abs(context.measureText(P.sample).width - base) > 0.5) differ += 1
+          const took = performance.now() - from
+          if (took > 20) slow.push(`${family}: ${Math.round(took)} ms`)
+        }
+        return { ms: Math.round(performance.now() - started), drawnInAnotherWidthThanTheFallback: differ, slow: slow.slice(0, 12) }
+      }
+      out.families = ALL.length
+      out.first = lap()
+      out.second = lap()
+    } else if (MODE === 'rows') {
+      // how long a list takes in which every family's name is drawn in the family itself
+      const started = performance.now()
+      const box = document.createElement('div')
+      for (const family of ALL) {
+        const row = document.createElement('div')
+        row.style.fontFamily = `"${clean(family)}", Arial, sans-serif`
+        row.textContent = `${family} Aa אבג 123`
+        box.appendChild(row)
+      }
+      document.body.appendChild(box)
+      const height = box.offsetHeight
+      const laidOut = performance.now()
+      const painted = await Promise.race([
+        new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))),
+        new Promise((done) => setTimeout(() => done(false), 5000)),
+      ])
+      out.families = ALL.length
+      out.height = height
+      out.layoutMs = Math.round(laidOut - started)
+      out.untilPaintedMs = painted ? Math.round(performance.now() - started) : 'no frame was drawn in 5 s'
+    } else {
+      const span = document.createElement('span')
+      span.textContent = P.sample
+      span.style.cssText = 'position:absolute;left:0;top:0;white-space:nowrap;font-size:200px;visibility:hidden'
+      document.body.appendChild(span)
+      const widthOf = (family, weight, synthesis) => {
+        span.style.fontFamily = `"${clean(family)}", "__no_such_family__"`
+        span.style.fontWeight = String(weight)
+        span.style.fontSynthesis = synthesis ? '' : 'none'
+        return Math.round(span.getBoundingClientRect().width * 100) / 100
+      }
+      const bytes = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0)).buffer
+      const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900]
+      // the five weights, loaded by the page itself under names of their own: what each is as wide as
+      const refs = {}
+      for (const kind of ['ttf', 'otf']) {
+        for (const [weight, files] of Object.entries(P.refs)) {
+          const name = `ProbeRef${kind}${weight}`
+          const face = await new FontFace(name, bytes(files[kind])).load()
+          document.fonts.add(face)
+          refs[`${kind}${weight}`] = widthOf(name, 400, false)
+        }
+      }
+      out.refs = refs
+      const fallback = {}
+      for (const weight of WEIGHTS) fallback[weight] = widthOf('__nothing_here__', weight, true)
+      out.fallback = fallback
+      const label = (width, weight) => {
+        for (const [key, ref] of Object.entries(refs)) if (key.startsWith('ttf') && Math.abs(width - ref) < 0.6) return key.slice(3)
+        if (Math.abs(width - fallback[weight]) < 0.6) return 'FALLBACK'
+        let best = null
+        for (const [key, ref] of Object.entries(refs)) if (key.startsWith('ttf') && (best === null || Math.abs(width - ref) < Math.abs(width - refs[best]))) best = key
+        const delta = width - refs[best]
+        return `${best.slice(3)}${delta > 0 ? '+' : ''}${delta.toFixed(1)}px`
+      }
+      // for a name: the weight really drawn for each weight asked (and, where it differs, what is drawn when the web view may not thicken a face itself)
+      const drawn = (name) => WEIGHTS.map((weight) => {
+        const free = label(widthOf(name, weight, true), weight)
+        const strict = label(widthOf(name, weight, false), weight)
+        return `${weight}>${free}${strict === free ? '' : `(unthickened ${strict})`}`
+      }).join('  ')
+      out.asInstalled = {}
+      for (const family of P.families) {
+        out.asInstalled[family.key] = { about: family.about, names: Object.fromEntries(family.tryNames.map((name) => [name, drawn(name)])) }
+      }
+      // the same families when the page loads their files itself under the family's name, each with the weight its name says
+      const put = async (family, kind, weights) => {
+        const started = performance.now()
+        for (const weight of weights) {
+          const face = await new FontFace(family, bytes(P.refs[weight][kind]), { weight: String(weight) }).load()
+          document.fonts.add(face)
+        }
+        return Math.round(performance.now() - started)
+      }
+      out.loadedByThePage = {}
+      for (const [family, kind, weights] of [['Probe Same', 'ttf', [300, 400, 500, 700, 900]], ['Probe CffSame', 'otf', [300, 400, 500, 700, 900]], ['Probe Odd', 'ttf', [300, 500, 900]], ['Probe Typo', 'ttf', [300, 900]]]) {
+        const ms = await put(family, kind, weights)
+        out.loadedByThePage[family] = { loaded: weights.join(','), ms, drawn: drawn(family) }
+      }
+    }
+  } catch (error) {
+    out.error = String((error && error.stack) || error)
+  }
+  window.webkit.messageHandlers.done.postMessage(JSON.stringify(out))
+})()
+</script>
