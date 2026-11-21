@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-latest, macos-15-intel]
+        runner: [macos-latest, macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
@@ -67,7 +67,11 @@ jobs:
           path: out
 
   app:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
@@ -80,11 +84,11 @@ jobs:
           python-version: '3.12'
       - name: Make the test fonts and install them
         run: bash font-names/install.sh
-      - name: Open the published program and write down what its window shows
+      - name: Open the published program and read what its font list shows
         run: bash font-names/app.sh
       - name: Keep what was read
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: app-look
+          name: app-${{ matrix.runner }}
           path: out
