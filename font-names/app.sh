@@ -1,7 +1,8 @@
 #!/bin/bash
-# Opens the published program with the test fonts installed and measures the processor time it uses: when its font list is opened the
-# first time and again, when the list is set to show Hebrew fonts only, and when the text tool is chosen after the program was opened
-# again with the list still set so.
+# Opens the published program with the test fonts installed. Reads what its own font list shows for them (which families, which
+# weights, and which of them stay when the list shows Hebrew fonts only), and measures the processor time the program uses: when the
+# font list is opened the first time and again, when it is set to show Hebrew fonts only, and when the text tool is chosen after the
+# program was opened again with the list still set so.
 set -u
 APP_NAME="eMood Trial 30"
 OUT="$PWD/out"
@@ -75,12 +76,26 @@ until_calm 90
 echo "processor time used: $(minus "$(used)" "$u") s (with the search for the button; calm again after $(since "$t") s)"
 screencapture -x "$OUT/b2-list-open.png"
 
+echo "== C. what the list shows for the test fonts =="
+key probe
+sleep 3
+screencapture -x "$OUT/c1-probe.png"
+rows c-probe
+all; key "probe glued"; sleep 2; screencapture -x "$OUT/c2-glued.png"
+all; key "probe win"; sleep 2; screencapture -x "$OUT/c3-win.png"
+all; key "probe same"; sleep 2; screencapture -x "$OUT/c4-same.png"
+all; osascript -e 'tell application "System Events" to key code 51' 2>&1
+sleep 2
+
 echo "== D. the list is set to show Hebrew fonts only =="
 u=$(used); t=$(now)
 AX click '^(גופנים בעברית|Hebrew fonts)$'
 until_calm 90
 echo "processor time used: $(minus "$(used)" "$u") s (with the search for the button; calm again after $(since "$t") s)"
 screencapture -x "$OUT/d-hebrew-only.png"
+AX dump > "$OUT/d-hebrew-only.txt"
+echo "families the list shows as Hebrew fonts: $(grep -c 'AXStaticText' "$OUT/d-hebrew-only.txt") text lines; the test families among them:"
+grep -E 'Probe|בדיקה' "$OUT/d-hebrew-only.txt" | sed 's/^ *//' | sort | uniq -c | cut -c1-120
 escape
 
 echo "== E. the program is closed and opened again (the list remembers 'Hebrew fonts only'); a document is opened and the text tool chosen =="
