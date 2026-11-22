@@ -22,7 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_REPO: wbdyhy0-create/imudist-releases
-      RELEASE_TAG: v0.0.53-trial30
+      RELEASE_TAG: v0.0.55-trial30
     steps:
       - uses: actions/checkout@v4
       - name: Open the program and run its self test
